@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN" data-deck="{{DECK_ID}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{TITLE}}</title>
+<link rel="stylesheet" href="assets/deck.css">
+<!-- 每一页自己的样式写在 assets/pages.css（每条规则以页前缀 .cNN 开头） -->
+<link rel="stylesheet" href="assets/pages.css">
+</head>
+<body>
+<div id="stage">
+
+<!-- 下面的页是骨架：版式和页型已经摆好，把〔〕里的字和 todo 图位换成自己的。页的顺序 = section 的顺序。
+     要显示「效果预览」角标：在下面这个 <div id="stage"> 上加 class="tags"（默认不显示）。 -->
+{{PAGES}}
+<!-- 顶栏：左边是标题（前面一个小黄块），右边一行小字。想换成 logo 图：把 <span class="wm">…</span> 换成 <img class="logo" src="assets/img/logo.svg" alt=""> -->
+<div id="nav"><span class="wm">{{TITLE}}</span><span class="r">{{CORNER}}</span></div>
+</div>
+
+<script src="assets/notes.js"></script>
+<script src="assets/pages.js"></script>
+<script src="assets/engine/deck.js"></script>
+<script src="assets/engine/annotate.js"></script>
+</body>
+</html>

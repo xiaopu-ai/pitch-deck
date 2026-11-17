@@ -1,0 +1,4 @@
+/* 每一页自己的样式。每条规则都以页前缀开头（.c03 …），不要写会影响别的页的规则。
+   通用件和页型都在 deck.css 里（整页的页型是 p-open、p-brief……），先用现成的，不够再在这里补。 */
+.c01-bg{position:absolute;inset:0;background:radial-gradient(ellipse 80% 70% at 50% 112%,rgba(245,196,0,.2),transparent 60%),var(--k0)}
+.slide.active .c01-bg{animation:push 16s var(--out) both}

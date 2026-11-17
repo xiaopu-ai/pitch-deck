@@ -1,0 +1,4 @@
+图放这里。
+每张图先在 tools/配图提示词.md 登记，文件名和登记的一样。出图得到的 png 很大，转成 jpg 再放。
+页面里写 assets/img/文件名；assets 下的 css 里写 url(img/文件名)。
+声音放 assets/audio/。
