@@ -82,12 +82,12 @@ document.querySelectorAll('.lr svg').forEach((svg, n) => {
     const scr = ply.querySelector('.scr'), fr = ply.querySelector('.fr'), strip = ply.querySelector('.strip');
     const items = [...ply.querySelectorAll('.shots li')]; if (!scr || !fr || !items.length) return;
     let t0 = 0; const T = items.map(li => { const o = { a: t0, d: parseFloat(li.dataset.len) || 2, img: li.dataset.img || '', cam: li.dataset.cam || '', mark: 'mark' in li.dataset, name: li.textContent.trim() }; t0 += o.d; return o; });
-    const TOTAL = t0, au = ply.dataset.audio ? new Audio(ply.dataset.audio) : null; if (au) au.preload = 'auto';
+    const TOTAL = t0, au = ply.dataset.audio ? new Audio(ply.dataset.audio) : null; if (au) { au.preload = 'none'; addEventListener('deck:warm', () => { au.preload = 'auto'; try { au.load(); } catch (e) {} }); }   // 音乐等各页的图在后台下完了再预备
     const set = (f, v) => ply.querySelectorAll(`[data-f="${f}"]`).forEach(e => e.textContent = v);
     let pos = 0, playing = false, raf = 0, base = 0, cur = -1, head = null, mute = !au;   // mute：没有声音（没写，或者放不出来），按时钟走
     if (strip) {
       T.forEach((s, k) => {
-        if (s.img) new Image().src = s.img;
+        if (s.img) addEventListener('deck:warm', () => { new Image().src = s.img; });
         const e = document.createElement('button'); e.style.flex = `${s.d} 0 0`; e.textContent = pad(k + 1); e.title = s.name; if (s.mark) e.className = 'road';
         e.addEventListener('click', () => play(s.a)); strip.appendChild(e);
       });

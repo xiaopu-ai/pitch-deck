@@ -491,3 +491,8 @@ html.is-preview #tb{display:none}
 
 /* 演讲者那一屏：▸ 开头的要点（手卡）比引擎默认的大一点、亮一点。只在演讲者视图里生效 */
 body.pv-body .pv-scroll p.gist{color:#dcdce2;font-size:calc(var(--nfs)*.84);line-height:1.5;margin-bottom:.3em;border-left:3px solid #f5c400;padding-left:16px}
+
+/* ---------- 加载 ----------
+   只渲染当前页和它前后两页；远处的页（.far）不渲染，它们的图就不会去下载。
+   引擎还没标好哪一页是当前页之前（html 上还没有 deck-on），一页都不渲染：不然浏览器会先把所有页的图都请求一遍。 */
+html:not(.deck-on) .slide,.slide.far{display:none}

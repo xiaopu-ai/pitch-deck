@@ -11,6 +11,11 @@
   const NS = 'td:' + (document.documentElement.dataset.deck || location.pathname) + ':';
   const q = new URLSearchParams(location.search);
   const MODE = q.get('presenter') === '1' ? 'presenter' : q.get('preview') === '1' ? 'preview' : 'audience';
+  // 演讲者视图、预览小窗的地址。放在网上时（页面带了内容指纹 data-v）写成 ?v=指纹&presenter=1#s=..&t=..：
+  // 带 ?v= 的地址，服务器让浏览器缓存一年；观众屏一打开就先把它取好，之后开演讲者视图不用再连服务器。第几页放在 # 后面，不影响缓存。
+  const VER = document.documentElement.dataset.v || '', ONLINE = /^https?:$/.test(location.protocol);
+  const hq = new URLSearchParams(location.hash.slice(1)), arg = k => (q.get(k) !== null ? q.get(k) : hq.get(k));
+  const modeURL = (mode, st) => location.pathname + (VER && ONLINE ? `?v=${VER}&` : '?') + `${mode}=1` + (st ? `#s=${st[0]}&t=${st[1]}` : '');
   const stage = document.getElementById('stage');
   const slides = [...document.querySelectorAll('.slide')];
   const maxStep = s => Math.max(0, ...[...s.querySelectorAll('[data-s]')].map(e => +e.dataset.s));
@@ -129,7 +134,7 @@
     slides.forEach((s, k) => {
       s.classList.toggle('active', k === i);
       s.classList.toggle('past', k < i);
-      s.classList.toggle('far', Math.abs(k - i) > 2);   // 离当前页远的页：不渲染、动画暂停，省显卡内存（不然后面会出白块）
+      s.classList.toggle('far', MODE === 'preview' ? k !== i : Math.abs(k - i) > 2);   // 离当前页远的页不渲染，它们的图也就不下载；预览小窗只渲染当前这一页
       // 离开的那页先保留它的 stN（淡出时保持最后的样子），900ms 后再清掉
       if (k === lastI && lastI !== i) return;
       for (let n = 0; n <= 12; n++) s.classList.toggle('st' + n, k === i && n <= step);
@@ -143,6 +148,7 @@
     pgno.textContent = `${pad2(i + 1)} / ${slides.length}`;
     if (window.onStep) window.onStep(i, step, s);
     if (!silent && MODE === 'audience') send({ af: 1, type: 'state', i, step });
+    document.documentElement.classList.add('deck-on');      // 标好了，可以渲染了（样式里：没有 deck-on 时一页都不渲染）
   }
   function go(st, silent) {
     const [ni, nt] = clampState(st[0], st[1]);
@@ -150,7 +156,7 @@
     i = ni; step = nt; apply(silent);
   }
 
-  [i, step] = clampState(q.get('s'), q.get('t'));
+  [i, step] = clampState(arg('s'), arg('t'));
   window.DECK = { go: (a, b) => go([a, b]), get i() { return i; }, get step() { return step; }, n: slides.length, meta: k => ({ id: slides[k].dataset.id || '', title: slides[k].dataset.title || '' }) };
 
   if (MODE === 'preview') {
@@ -173,7 +179,8 @@
 
   function openPresenter() {
     if (peer && !peer.closed) { peer.focus(); return; }
-    peer = window.open(location.pathname + `?presenter=1&s=${i}&t=${step}`, 'td-presenter', 'width=1440,height=900');
+    warmHold = Date.now() + 5000;
+    peer = window.open(modeURL('presenter', [i, step]), 'td-presenter', 'width=1440,height=900');
     if (!peer) alert('浏览器拦截了弹窗。请允许本页弹出窗口，再按 S。');
   }
 
@@ -194,6 +201,32 @@
   addEventListener('click', e => { if (!e.target.closest('a') && !ov.open) go(nextState(i, step)); });
   const ov = makeOverview(() => i, k => go([k, 0]));
   apply();
+
+  /* 当前要用的图下完以后（load 事件），把后面各页的图一张一张在后台下好。之后翻页、开演讲者视图，图都从缓存里拿。
+     一次只下一张，不和眼前要用的东西抢网速。下完发一个 deck:warm 事件，页面自己的脚本可以接着预备别的（比如音乐）。 */
+  let warmHold = 0;                                  // 开演讲者视图的那几秒，后台下载先停一停，把网速让出来
+  function warm() {
+    const urls = [...new Set([...document.querySelectorAll('.slide [style*="url("]')].map(e => (e.getAttribute('style').match(/url\(["']?([^"')]+)/) || [])[1]).filter(Boolean))];
+    let k = 0;
+    const next = () => {
+      if (k >= urls.length) { try { window.dispatchEvent(new Event('deck:warm')); } catch (e) {} return; }
+      const im = new Image(); im.onload = im.onerror = () => setTimeout(next, Math.max(20, warmHold - Date.now())); im.src = urls[k++];
+    };
+    next();
+  }
+  if (document.readyState === 'complete') setTimeout(warm, 600); else addEventListener('load', () => setTimeout(warm, 600));
+
+  /* 放在网上时：先把演讲者视图和预览小窗的页面取好（地址带指纹，缓存一年）。之后按 S，这两个页面直接从缓存里出来。
+     预览小窗是嵌在页面里的窗口，浏览器给它单独记一份缓存，所以用一个看不见的小窗口去取。 */
+  if (VER && ONLINE) {
+    try { fetch(modeURL('presenter'), { credentials: 'same-origin' }).catch(() => {}); } catch (e) {}
+    const pre = () => {
+      const f = document.createElement('iframe'); f.tabIndex = -1; f.setAttribute('aria-hidden', 'true');
+      f.style.cssText = 'position:fixed;left:-9999px;top:0;width:10px;height:10px;border:0;visibility:hidden';
+      f.onload = () => setTimeout(() => f.remove(), 2000); f.src = modeURL('preview', [i, step]); document.body.appendChild(f);
+    };
+    pre();
+  }
 
   /* ================= 演讲者视图 ================= */
   function presenter() {
@@ -221,8 +254,10 @@
     document.title = '演讲者视图 · ' + title;
     document.body.innerHTML = '';
     document.body.className = 'pv-body';
-    const css = document.createElement('link');
-    css.rel = 'stylesheet'; css.href = BASE + 'presenter.css';
+    // 样式直接写在这里（内容和 presenter.css 一样，改了 presenter.css 以后跑 tools/inline_presenter_css.py 更新）：
+    // 不用再等一个文件，演讲者视图一出来就是排好版的。
+    const css = document.createElement('style');
+    css.textContent = /*PV_CSS_BEGIN*/"/* 演讲者视图 · 暗色苹果风。放在笔记本屏上看，字要大、扫一眼就能找到 */\nhtml,body.pv-body{cursor:auto;overflow:hidden;background:#000}\n.pv-body{--nfs:30px;--acc:#2997ff;--ok:#30d158;--warn:#ffd60a;--bad:#ff453a;\n  height:100vh;display:grid;grid-template-rows:auto 1fr auto;gap:14px;padding:16px 20px 10px;color:#f5f5f7;\n  font-family:-apple-system,\"SF Pro Text\",\"PingFang SC\",\"Helvetica Neue\",sans-serif;-webkit-font-smoothing:antialiased}\n.pv-body.is-black{box-shadow:inset 0 0 0 4px var(--bad)}\n\n/* 顶栏 */\n.pv-top{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:20px}\n.pv-deck{font-size:15px;color:#86868b;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}\n.pv-deck span{margin-left:10px;padding:3px 10px;border-radius:99px;background:#1d1d1f;color:#d1d1d6;font-size:12px}\n.pv-where{display:flex;align-items:center;gap:14px;font-size:22px;font-weight:700}\n.pv-where b{font-variant-numeric:tabular-nums;color:#86868b;font-weight:600}\n.pv-where i{display:flex;gap:6px}\n.pv-where s{width:10px;height:10px;border-radius:50%;background:#3a3a3c;text-decoration:none}\n.pv-where s.done{background:#636366}.pv-where s.cur{background:var(--acc);box-shadow:0 0 0 4px rgba(41,151,255,.25)}\n.pv-clock{display:flex;justify-content:flex-end;align-items:center;gap:16px;font-variant-numeric:tabular-nums}\n.pv-clock span{color:#86868b;font-size:18px}\n.pv-clock b{font-size:34px;font-weight:700;letter-spacing:-.01em}\n.pv-clock em{font-style:normal;font-size:15px;font-weight:700;padding:6px 14px;border-radius:99px;background:#1d1d1f;color:#86868b}\n.pv-clock em.ok{background:rgba(48,209,88,.16);color:var(--ok)}\n.pv-clock em.fast{background:rgba(41,151,255,.16);color:var(--acc)}\n.pv-clock em.slow{background:rgba(255,69,58,.18);color:var(--bad)}\n\n/* 主体：左逐字稿，右预览 */\n.pv-main{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(0,1fr);gap:16px;min-height:0}\n.pv-notes,.pv-card{background:#161617;border-radius:22px;display:flex;flex-direction:column;min-height:0}\n.pv-notes{padding:18px 6px 0 30px}\n.pv-lab{display:flex;justify-content:space-between;align-items:center;font-size:13px;font-weight:600;color:#86868b;letter-spacing:.04em;margin-bottom:12px;padding-right:24px}\n.pv-scroll{position:relative;flex:1;overflow-y:auto;padding:0 24px 45vh 0;scroll-behavior:smooth}\n.pv-scroll::-webkit-scrollbar{width:6px}.pv-scroll::-webkit-scrollbar-thumb{background:#3a3a3c;border-radius:6px}\n.pv-scroll h2{font-size:15px;color:#636366;font-weight:600;margin:4px 0 18px}\n.pv-scroll p{font-size:var(--nfs);line-height:1.62;margin:0 0 .7em;color:#a1a1a6;padding-left:18px;border-left:4px solid transparent;transition:color .35s,border-color .35s,opacity .35s}\n.pv-scroll p.past{color:#48484a}\n.pv-scroll p.now{color:#f5f5f7;border-left-color:var(--acc)}\n.pv-scroll p strong{color:#fff;font-weight:700;background:linear-gradient(transparent 62%,rgba(41,151,255,.38) 0)}\n.pv-scroll p.past strong{color:#636366;background:none}\n.pv-scroll .dir{display:inline-block;font-size:.62em;font-weight:700;color:#000;background:var(--warn);padding:2px 12px;border-radius:99px;vertical-align:.15em;letter-spacing:.04em}\n.pv-scroll p.past .dir{background:#3a3a3c;color:#86868b}\n.pv-scroll p.warn{color:#ff9f0a;font-size:calc(var(--nfs)*.72)}\n.pv-scroll p.edited::after{content:\"已改\";font-size:12px;color:var(--acc);margin-left:10px;vertical-align:middle}\n.pv-scroll p.empty{color:#48484a}\n.is-edit .pv-scroll p{color:#f5f5f7;outline:1px dashed #3a3a3c;outline-offset:6px;border-radius:4px}\n.is-edit .pv-scroll p:focus{outline-color:var(--acc)}\n\n.pv-side{display:grid;grid-template-rows:auto auto 1fr;gap:16px;min-height:0}\n.pv-card{padding:14px 16px 16px}\n.pv-frame{position:relative;aspect-ratio:16/9;border-radius:12px;overflow:hidden;background:#000;box-shadow:0 0 0 1px #2c2c2e}\n.pv-frame.small{width:72%}\n.pv-frame iframe{position:absolute;inset:0;width:100%;height:100%;border:0;pointer-events:none}\n.pv-end{position:absolute;inset:0;display:none;align-items:center;justify-content:center;font-size:22px;font-weight:700;color:#86868b}\n.pv-cue{color:#f5f5f7;font-size:15px;letter-spacing:0;text-align:right;max-width:70%}\n.pv-black{display:none;background:var(--bad);color:#fff;padding:2px 10px;border-radius:99px;letter-spacing:0}\n\n.pv-time{justify-content:flex-start}\n.pv-time .pv-lab span:last-child{color:#f5f5f7;font-size:18px;font-variant-numeric:tabular-nums;letter-spacing:0}\n.pv-meter{height:8px;border-radius:9px;background:#2c2c2e;overflow:hidden}\n.pv-meter i{display:block;height:100%;width:0;background:var(--ok);border-radius:9px;transition:width .8s,background .4s}\n.pv-meter i.warn{background:var(--warn)}.pv-meter i.over{background:var(--bad)}\n.pv-btns{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}\n.pv-btns button{font:600 14px -apple-system,\"PingFang SC\",sans-serif;color:#f5f5f7;background:#2c2c2e;border:0;border-radius:99px;padding:9px 16px;cursor:pointer}\n.pv-btns button:hover{background:#3a3a3c}\n.pv-foot{font-size:12px;color:#48484a;text-align:center}\n/* 整场 100 多分钟：数字更长，别折行 */\n.pv-clock b{font-size:30px;white-space:nowrap}\n.pv-clock em{white-space:nowrap}\n.pv-where{white-space:nowrap;overflow:hidden}\n.pv-side{grid-template-rows:auto auto minmax(0,1fr)}\n.pv-frame.small{width:58%}\n.pv-btns{margin-top:12px}\n.pv-btns button{padding:7px 13px;font-size:13px}\n\n/* 批注 215 / 222：按当前步骤分段呈现，备注原文不变。 */\n.pv-body{--acc:#ff7a1a}\n.pv-scroll{padding-bottom:18px;overflow:hidden}\n.pv-scroll p[hidden]{display:none!important}\n.pv-scroll p{line-height:1.5}\n.pv-scroll p strong{background:linear-gradient(transparent 62%,rgba(255,122,26,.28) 0)}\n.pv-where s.cur{box-shadow:0 0 0 4px rgba(255,122,26,.2)}\n.pv-body.is-edit .pv-scroll,.pv-scroll.notes-overflow{overflow-y:auto}\n.pv-scroll p.gist{color:#8e8e93;font-size:calc(var(--nfs)*.6);line-height:1.45;border-left:3px solid #3a3a3c;padding-left:14px}\n"/*PV_CSS_END*/;
     document.head.appendChild(css);
 
     const base = location.pathname;
@@ -256,15 +291,16 @@
 
     const $ = id => document.getElementById(id);
     const fCur = $('fCur'), fNext = $('fNext'), scroll = $('pvScroll');
-    let [ci, ct] = clampState(q.get('s'), q.get('t'));
+    let [ci, ct] = clampState(arg('s'), arg('t'));
     let editing = false, black = false;
 
     /* 预览：首次加载用 URL，之后只 postMessage，不重载、不闪 */
     function preview(frame, st) {
       if (!frame.dataset.ready) {
-        frame.src = `${base}?preview=1&s=${st[0]}&t=${st[1]}`;
         frame.dataset.ready = '1';
         frame.onload = () => frame.contentWindow.postMessage({ af: 1, type: 'state', i: frame._st[0], step: frame._st[1] }, '*');
+        const url = modeURL('preview', st);
+        requestAnimationFrame(() => setTimeout(() => { frame.src = url; }, 30));     // 先让演讲者视图自己画出来，再去加载小窗
       } else {
         try { frame.contentWindow.postMessage({ af: 1, type: 'state', i: st[0], step: st[1] }, '*'); } catch (e) {}
       }
@@ -322,7 +358,6 @@
       scroll.classList.toggle('notes-overflow', scroll.scrollHeight > scroll.clientHeight + 1);
     }
     addEventListener('resize', fitNotes);
-    css.addEventListener('load', fitNotes);
     document.fonts.ready.then(fitNotes);
 
     function cueFor(st) {
